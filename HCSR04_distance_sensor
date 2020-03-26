@@ -1,0 +1,82 @@
+/*
+ * Mesure de distance avec le HCSR04 et envoi de la mesure en LoRa (RN2483) sur la plateforme The Things network, puis entre en sommeil.
+ *    UART_TX (6)   <-->   10 (1KOhm entre)
+      UART_RX (7)   <-->   11 (1KOhm entre)
+      RESET (32)    <-->   12 (1KOhm entre)
+      VDD (34)      <-->   5V
+      GND (33)      <-->   Gnd
+ *
+ *
+*/
+
+// **** INCLUDES *****
+#include "LowPower.h"
+#include <TheThingsNetwork.h>
+#include <SoftwareSerial.h>
+
+//Serial
+SoftwareSerial loraSerial(10, 11); // RX, TX
+#define debugSerial Serial
+
+//TTN
+#define freqPlan TTN_FP_EU868
+const char *appEui = "*************";
+const char *appKey = "********************************";
+TheThingsNetwork ttn(loraSerial, debugSerial, freqPlan, 10);
+
+//HCSR04
+int i = 0;
+const int TRIGGER_PIN = 2; // Broche TRIGGER
+const int ECHO_PIN = 3;    // Broche ECHO
+const unsigned long MEASURE_TIMEOUT = 25000UL; // 25ms = ~8m à 340m/s
+const float SOUND_SPEED = 340.0 / 1000;
+
+
+void setup()
+{
+  //PARAMETRAGE HCSR04
+  pinMode(TRIGGER_PIN, OUTPUT);
+  digitalWrite(TRIGGER_PIN, LOW);
+  pinMode(ECHO_PIN, INPUT);
+
+  //PARAMETRAGE TTN
+  loraSerial.begin(57600);
+  debugSerial.begin(9600);
+  
+  // Wait a maximum of 10s for Serial Monitor
+  while (!debugSerial && millis() < 10000)
+    ;
+  debugSerial.println("-- STATUS");
+  ttn.showStatus();
+
+  debugSerial.println("-- JOIN");
+  ttn.join(appEui, appKey);
+}
+
+
+void loop() 
+{
+  //------- MESURE BATTERIE
+  int power = analogRead(A0)/4;
+  
+  //------- MESURE HCSR04
+  digitalWrite(TRIGGER_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIGGER_PIN, LOW);
+  long measure = pulseIn(ECHO_PIN, HIGH, MEASURE_TIMEOUT);
+  uint32_t distance = measure / 2.0 * SOUND_SPEED / 10 * 100;
+  Serial.println(distance);
+
+  //------- ENVOI MESURE TTN
+  debugSerial.println("-- LOOP");
+  byte payload[3];
+  payload[0] = highByte(distance);
+  payload[1] = lowByte(distance);
+  payload[2] = power;
+  ttn.sendBytes(payload, sizeof(payload));
+
+  //------- SLEEP 
+  for (int i = 0; i <= 8; i++) {
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);  
+  }
+}
